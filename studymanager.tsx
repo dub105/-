@@ -239,6 +239,48 @@ function VSchedule({S,getSubj,weekOff,setWeekOff,openSchM,delSched}){
   </div>;
 }
 
+function getStudyComment({todayMins,studyLogs,exams,todayStr}){
+  // Consecutive day streak
+  const dates=[...new Set(studyLogs.map(l=>l.date))].sort().reverse();
+  let streak=0;
+  for(let i=0;i<dates.length;i++){
+    const diff=Math.round((new Date(todayStr)-new Date(dates[i]))/86400000);
+    if(diff===i) streak++;
+    else break;
+  }
+  // Days until nearest exam
+  const nearExam=exams.filter(e=>(e.type||"exam")==="exam").map(e=>daysUntil(e.date)).filter(d=>d>=0).sort((a,b)=>a-b)[0];
+  const h=Math.floor(todayMins/60),m=todayMins%60;
+  const timeStr=h>0?`${h}時間${m?m+"分":""}`:`${todayMins}分`;
+
+  if(todayMins===0){
+    if(nearExam!==undefined&&nearExam<=7) return{icon:"⚡",msg:"試験まであと"+nearExam+"日！",sub:"今日の学習をスタートしましょう",color:C.danger};
+    if(streak>=3)                         return{icon:"🔥",msg:streak+"日連続記録中！",sub:"今日も継続してみましょう",color:C.accent};
+    return{icon:"📖",msg:"さあ、始めましょう！",sub:"ストップウォッチで学習を記録できます",color:C.sub};
+  }
+  if(todayMins>=180){
+    if(streak>=5) return{icon:"🏆",msg:streak+"日連続！最高の一日",sub:timeStr+"の学習、圧巻の集中力です",color:C.ok};
+    return{icon:"🌟",msg:"素晴らしい集中力！",sub:timeStr+"の学習を達成。今日は本当によく頑張りました",color:C.ok};
+  }
+  if(todayMins>=120){
+    if(nearExam!==undefined&&nearExam<=14) return{icon:"🎯",msg:"試験"+nearExam+"日前、良いペース！",sub:timeStr+"の学習で着実に準備が進んでいます",color:C.ok};
+    if(streak>=3) return{icon:"🔥",msg:streak+"日連続！継続力が光ります",sub:"今日も"+timeStr+"しっかり取り組めました",color:C.ok};
+    return{icon:"💪",msg:"絶好調です！",sub:timeStr+"の学習を達成。この調子で続けましょう",color:C.blue};
+  }
+  if(todayMins>=60){
+    if(nearExam!==undefined&&nearExam<=7) return{icon:"⚡",msg:"試験まであと"+nearExam+"日！",sub:timeStr+"の積み重ねが合格へ繋がります",color:C.warn};
+    if(streak>=3) return{icon:"🔥",msg:streak+"日連続継続中！",sub:"今日も"+timeStr+"の積み重ね。コツコツが一番大切",color:C.blue};
+    return{icon:"⭐",msg:"良いペースです！",sub:timeStr+"の学習ができています。この調子で",color:C.blue};
+  }
+  if(todayMins>=30){
+    if(nearExam!==undefined&&nearExam<=14) return{icon:"⚠️",msg:"試験"+nearExam+"日前、もう一踏ん張り！",sub:"今日はあと少し頑張れそうですか？",color:C.warn};
+    return{icon:"🌱",msg:"スタート順調！",sub:timeStr+"を達成。小さな積み重ねが大きな力に",color:C.blue};
+  }
+  // < 30 mins
+  if(nearExam!==undefined&&nearExam<=14) return{icon:"⚠️",msg:"試験まであと"+nearExam+"日！",sub:"今日はもう少し頑張れそうですか？",color:C.warn};
+  return{icon:"✨",msg:"今日もスタート！",sub:timeStr+"を記録しました。この調子で続けましょう",color:C.accent};
+}
+
 function VTimer({S,getSubj,timerRunning,timerSecs,timerSubj,setTimerSubj,timerNote,setTimerNote,timerTaskId,setTimerTaskId,startTimer,pauseTimer,resetTimer,saveSession,reportTab,setReportTab,studyLogs,deleteLog,addManualLog,fmtMins,fmtSecs}){
   const [showManual,setShowManual]=useState(false);
   const [mSubj,setMSubj]=useState(timerSubj||S.subjects[0]?.id||"");
@@ -255,6 +297,7 @@ function VTimer({S,getSubj,timerRunning,timerSecs,timerSubj,setTimerSubj,timerNo
   const scopeLogs=reportTab==="daily"?todayLogs:weekLogs;
   const totalMins=reportTab==="daily"?todayMins:weekMins;
   const bySubj={};scopeLogs.forEach(l=>{bySubj[l.subjectId]=(bySubj[l.subjectId]||0)+l.mins;});
+  const comment=getStudyComment({todayMins,studyLogs,exams:S.exams,todayStr});
   const weekBarData=["月","火","水","木","金","土","日"].map((lbl,i)=>({d:weekDates[i],lbl,mins:weekLogs.filter(l=>l.date===weekDates[i]).reduce((a,l)=>a+l.mins,0)}));
   const maxBar=Math.max(...weekBarData.map(b=>b.mins),60);
   return <div>
@@ -313,9 +356,16 @@ function VTimer({S,getSubj,timerRunning,timerSecs,timerSubj,setTimerSubj,timerNo
         <SecLabel style={{margin:0,flex:1}}>📊 学習レポート</SecLabel>
         <div style={{display:"flex",gap:5}}>{[["daily","今日"],["weekly","今週"]].map(([k,lbl])=><div key={k} onClick={()=>setReportTab(k)} style={{padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",background:reportTab===k?"rgba(245,158,11,0.14)":"transparent",color:reportTab===k?C.accent:C.sub}}>{lbl}</div>)}</div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
         {[{lbl:"学習時間",val:fmtMins(totalMins),color:C.accent},{lbl:"セッション数",val:scopeLogs.length+"回",color:C.blue},{lbl:"科目数",val:Object.keys(bySubj).length+"科目",color:C.ok}].map(s=><div key={s.lbl} style={{background:C.surf2,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",textAlign:"center"}}><div style={{fontSize:11,color:C.sub,marginBottom:6}}>{s.lbl}</div><div style={{fontSize:22,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.color}}>{s.val}</div></div>)}
       </div>
+      {reportTab==="daily"&&<div style={{display:"flex",alignItems:"center",gap:14,padding:"14px 18px",borderRadius:10,marginBottom:16,background:`${comment.color}14`,border:`1px solid ${comment.color}40`}}>
+        <div style={{fontSize:28,flexShrink:0}}>{comment.icon}</div>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,color:comment.color,marginBottom:3}}>{comment.msg}</div>
+          <div style={{fontSize:12,color:C.dim,lineHeight:1.5}}>{comment.sub}</div>
+        </div>
+      </div>}
       {reportTab==="weekly"&&<div style={{marginBottom:20}}>
         <div style={{fontSize:12,fontWeight:700,color:C.sub,marginBottom:10}}>日別学習時間</div>
         <div style={{display:"flex",gap:6,alignItems:"flex-end",height:100}}>{weekBarData.map(b=>{const h=maxBar>0?Math.round((b.mins/maxBar)*88):0;const isT=b.d===todayStr;return <div key={b.d} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}><div style={{fontSize:9,color:C.sub,fontFamily:"'DM Mono',monospace"}}>{b.mins>0?b.mins+"m":""}</div><div style={{width:"100%",height:88,display:"flex",alignItems:"flex-end"}}><div style={{width:"100%",height:h||2,background:isT?C.accent:C.blue,borderRadius:"4px 4px 0 0",opacity:isT?1:0.6,transition:"height .4s ease",minHeight:2}}/></div><div style={{fontSize:10,fontWeight:700,color:isT?C.accent:C.sub}}>{b.lbl}</div></div>;})}
