@@ -585,6 +585,8 @@ export default function App(){
   const [timerTaskId,setTimerTaskId]=useState(null); // linked plan task
   const [reportTab,setReportTab]=useState("daily");
   const timerRef=useRef(null);
+  const timerStartRef=useRef(null); // Date.now() when timer last started
+  const timerBaseRef=useRef(0);     // accumulated secs before current start
   // Modals
   const [modal,setModal]=useState(null);
   const [confirmCfg,setConfirmCfg]=useState(null);
@@ -599,7 +601,35 @@ export default function App(){
     try{ localStorage.setItem("medstudy_v6", JSON.stringify(S)); }catch(e){}
   },[S]);
 
-  useEffect(()=>{return ()=>clearInterval(timerRef.current);},[]);
+  useEffect(()=>{
+    // Restore running timer from localStorage (survives page reload)
+    try{
+      const saved=localStorage.getItem("medstudy_timer");
+      if(saved){
+        const {startTs,baseSecs}=JSON.parse(saved);
+        const elapsed=Math.floor((Date.now()-startTs)/1000);
+        timerStartRef.current=startTs;
+        timerBaseRef.current=baseSecs;
+        setTimerSecs(baseSecs+elapsed);
+        setTimerRunning(true);
+        timerRef.current=setInterval(()=>{
+          setTimerSecs(Math.floor((Date.now()-timerStartRef.current)/1000)+timerBaseRef.current);
+        },500);
+      }
+    }catch(e){}
+    return ()=>clearInterval(timerRef.current);
+  },[]);
+
+  // Snap display to correct time when returning from background
+  useEffect(()=>{
+    const onVisible=()=>{
+      if(timerStartRef.current!==null){
+        setTimerSecs(Math.floor((Date.now()-timerStartRef.current)/1000)+timerBaseRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange",onVisible);
+    return ()=>document.removeEventListener("visibilitychange",onVisible);
+  },[]);
 
   const upd=fn=>setS(prev=>{const n=JSON.parse(JSON.stringify(prev));fn(n);return n;});
   const getSubj=id=>S.subjects.find(s=>s.id===id);
@@ -631,10 +661,24 @@ export default function App(){
   const applyPastedPlan=text=>{setPlanErr("");try{const cleaned=text.replace(/```[\w]*\n?/g,"").trim();const match=cleaned.match(/\[[\s\S]*\]/);if(!match)throw new Error("JSON配列が見つかりませんでした");const tasks=JSON.parse(match[0]);if(!Array.isArray(tasks)||!tasks.length)throw new Error("タスクリストが空です");const nameToId={};S.subjects.forEach(s=>{nameToId[s.name]=s.id;});upd(n=>{n.planTasks=tasks.map((t,i)=>({...t,id:String(Date.now())+"_"+i,completed:false,subject:nameToId[t.subject]||S.subjects.find(s=>s.id===t.subject)?.id||S.subjects[0]?.id}));});setPasteText("");toast("計画を反映しました ✅");}catch(e){setPlanErr("エラー: "+e.message);}};
   const toggleTask=id=>upd(n=>{if(Array.isArray(n.planTasks))n.planTasks=n.planTasks.map(t=>t.id===id?{...t,completed:!t.completed}:t);});
   const clearPlan=()=>{upd(n=>{n.planTasks=null;});setPasteText("");toast("計画をクリアしました");};
-  // Timer
-  const startTimer=()=>{if(timerRunning)return;setTimerRunning(true);timerRef.current=setInterval(()=>setTimerSecs(s=>s+1),1000);};
-  const pauseTimer=()=>{setTimerRunning(false);clearInterval(timerRef.current);};
-  const resetTimer=()=>{pauseTimer();setTimerSecs(0);};
+  // Timer — timestamp-based so background / screen-off doesn't stop the count
+  const startTimer=()=>{
+    if(timerRunning)return;
+    timerStartRef.current=Date.now();
+    timerBaseRef.current=timerSecs;
+    try{ localStorage.setItem("medstudy_timer",JSON.stringify({startTs:timerStartRef.current,baseSecs:timerBaseRef.current})); }catch(e){}
+    setTimerRunning(true);
+    timerRef.current=setInterval(()=>{
+      setTimerSecs(Math.floor((Date.now()-timerStartRef.current)/1000)+timerBaseRef.current);
+    },500);
+  };
+  const pauseTimer=()=>{
+    setTimerRunning(false);
+    clearInterval(timerRef.current);
+    timerStartRef.current=null;
+    try{ localStorage.removeItem("medstudy_timer"); }catch(e){}
+  };
+  const resetTimer=()=>{pauseTimer();setTimerSecs(0);timerBaseRef.current=0;};
   const saveSession=()=>{
     const mins=secsToMins(timerSecs);
     if(mins<1){toast("1分未満は記録できません");return;}
@@ -652,6 +696,7 @@ export default function App(){
       }
     });
     toast(fmtMins(mins)+"を記録しました"+(linkedTask?" · "+linkedTask.title+"を完了":"")+" ✅");
+    try{ localStorage.removeItem("medstudy_timer"); }catch(e){}
     resetTimer();setTimerNote("");setTimerTaskId(null);
   };
   const addManualLog=(subjId,mins,note,date)=>{if(mins<1||!subjId)return;upd(n=>{if(!n.studyLogs)n.studyLogs=[];n.studyLogs.push({id:uid(),subjectId:subjId,date:date||dsOf(),mins,note:note||"",ts:Date.now()});});toast("記録しました");};
